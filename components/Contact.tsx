@@ -12,20 +12,27 @@ export default function Contact() {
                 <p>
                   Ponmanam Plaza, Upstairs Reliance Trends,<br />
                   Near New Bus Stand Road,<br />
-                  Perambalur, Tamil Nadu - 621220
+                  Perambalur, Tamil Nadu - 621212
                 </p>
               </div>
             </div>
             <div className="info-item">
               <i className='bx bxl-whatsapp'></i>
               <div>
-                <h3>WhatsApp</h3>
+                <h3>Contact Number</h3>
+                <p>+91 9962456600</p>
+              </div>
+            </div>
+            <div className="info-item">
+              <i className='bx bxl-whatsapp'></i>
+              <div>
+                <h3>WhatsApp Enquiry</h3>
                 <p>+91 9994400124</p>
               </div>
             </div>
 
             <div className="contact-actions">
-              <a href="tel:+919994400124" className="btn btn-outline">
+              <a href="tel:+919962456600" className="btn btn-outline">
                 <i className='bx bxs-phone-call'></i> Call Us
               </a>
               <a href="https://wa.me/919994400124" target="_blank" className="btn btn-primary" rel="noreferrer">
