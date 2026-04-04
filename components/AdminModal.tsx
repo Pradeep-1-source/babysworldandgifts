@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useRef, useEffect } from 'react';
 import { Product } from '../hooks/useStore';
+import { createClient } from '@/utils/supabase/client';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -15,7 +16,9 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<'manage-products' | 'manage-categories'>('manage-products');
   
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Product Form State
   const [productId, setProductId] = useState('');
@@ -23,15 +26,18 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
   const [productCat, setProductCat] = useState('');
   const [productDesc, setProductDesc] = useState('');
   const [currentImageBase64, setCurrentImageBase64] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Category Form State
   const [newCatName, setNewCatName] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const supabase = createClient();
 
   // Clear states when closing
   useEffect(() => {
     if (!isOpen) {
+      setEmail('');
       setPassword('');
       resetProductForm();
       setNewCatName('');
@@ -47,13 +53,27 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password === 'Baby@2426') {
-      setIsAdminLoggedIn(true);
-      setPassword('');
-    } else {
-      alert('Invalid Password!');
+    setIsSubmitting(true);
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setIsAdminLoggedIn(true);
+        setPassword('');
+        setEmail('');
+      } else {
+        alert(data.message || 'Invalid credentials');
+      }
+    } catch (error) {
+      alert('Login failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -67,12 +87,14 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
     setProductCat(categories[0] || '');
     setProductDesc('');
     setCurrentImageBase64('');
+    setSelectedFile(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
@@ -83,31 +105,63 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
     }
   };
 
-  const handleProductSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newProds = [...products];
-    if (productId) {
-      const index = newProds.findIndex(p => p.id === productId);
-      if (index !== -1) {
-        newProds[index].title = productTitle;
-        newProds[index].category = productCat;
-        newProds[index].description = productDesc;
-        if (currentImageBase64 !== '') {
-          newProds[index].image = currentImageBase64;
-        }
-      }
-    } else {
-      newProds.unshift({
-        id: Date.now().toString(),
-        title: productTitle,
-        category: productCat,
-        description: productDesc,
-        image: currentImageBase64
-      });
+  const uploadImage = async (file: File) => {
+    const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+    const { data, error } = await supabase.storage
+      .from('product-images')
+      .upload(fileName, file);
+
+    if (error) {
+      console.error('Upload error:', error);
+      throw error;
     }
-    saveProducts(newProds);
-    resetProductForm();
-    alert('Product saved successfully!');
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(fileName);
+
+    return publicUrl;
+  };
+
+  const handleProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+        let imageUrl = products.find(p => p.id === productId)?.image || '';
+
+        if (selectedFile) {
+            imageUrl = await uploadImage(selectedFile);
+        }
+
+        const productData = {
+          title: productTitle,
+          category: productCat,
+          description: productDesc,
+          image_url: imageUrl
+        };
+
+        if (productId) {
+          const { error } = await supabase
+            .from('products')
+            .update(productData)
+            .eq('id', productId);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('products')
+            .insert([productData]);
+          if (error) throw error;
+        }
+
+        await saveProducts([]); // Trigger refresh
+        resetProductForm();
+        alert('Product saved successfully!');
+    } catch (error) {
+        console.error('Error saving product:', error);
+        alert('Failed to save product. Make sure the database tables exist.');
+    } finally {
+        setIsSubmitting(false);
+    }
   };
 
   const editProduct = (p: Product) => {
@@ -115,33 +169,65 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
     setProductTitle(p.title);
     setProductCat(p.category);
     setProductDesc(p.description || '');
-    setCurrentImageBase64(''); // Keep empty, we only update if they upload a new one
+    setCurrentImageBase64(p.image); 
+    setSelectedFile(null);
     setActiveTab('manage-products');
   };
 
-  const deleteProduct = (id: string) => {
+  const deleteProduct = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
-      saveProducts(products.filter(p => p.id !== id));
+      const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+      
+      if (error) {
+        alert('Failed to delete product');
+      } else {
+        await saveProducts([]); // Trigger refresh
+      }
     }
   };
 
-  const handleCatSubmit = (e: React.FormEvent) => {
+  const handleCatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newCatName.trim();
     if (trimmed !== '') {
       if (!categories.includes(trimmed)) {
-        saveCategories([...categories, trimmed]);
-        setNewCatName('');
-        alert('Category added successfully!');
+        setIsSubmitting(true);
+        try {
+            const { error } = await supabase
+              .from('categories')
+              .insert([{ name: trimmed }]);
+            
+            if (error) throw error;
+
+            await saveCategories([]); // Trigger refresh
+            setNewCatName('');
+            alert('Category added successfully!');
+        } catch (error) {
+            alert('Failed to add category');
+        } finally {
+            setIsSubmitting(false);
+        }
       } else {
         alert('Category already exists!');
       }
     }
   };
 
-  const deleteCategory = (cat: string) => {
-    if (window.confirm(`Are you sure you want to delete the category "${cat}"? Products in this category will still exist but lack a valid filter unless changed.`)) {
-      saveCategories(categories.filter(c => c !== cat));
+  const deleteCategory = async (cat: string) => {
+    if (window.confirm(`Are you sure you want to delete the category "${cat}"?`)) {
+      const { error } = await supabase
+        .from('categories')
+        .delete()
+        .eq('name', cat);
+      
+      if (error) {
+        alert('Failed to delete category');
+      } else {
+        await saveCategories([]); // Trigger refresh
+      }
     }
   };
 
@@ -155,6 +241,17 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
             <h2>Admin Login</h2>
             <form className="admin-form" onSubmit={handleLogin}>
               <div className="form-group">
+                <label htmlFor="admin-email">Email</label>
+                <input
+                  type="email"
+                  id="admin-email"
+                  required
+                  placeholder="Enter admin email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
                 <label htmlFor="admin-password">Password</label>
                 <input
                   type="password"
@@ -165,7 +262,9 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
                   onChange={e => setPassword(e.target.value)}
                 />
               </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Login</button>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={isSubmitting}>
+                {isSubmitting ? 'Logging in...' : 'Login'}
+              </button>
             </form>
           </div>
         ) : (
@@ -222,7 +321,9 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
                     { productId && (
                         <button type="button" className="btn btn-outline" style={{ width: '100%', margin: '10px 0' }} onClick={resetProductForm}>Cancel Edit</button>
                     )}
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Save Product</button>
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={isSubmitting}>
+                        {isSubmitting ? 'Saving...' : 'Save Product'}
+                    </button>
                  </form>
 
                  <div className="admin-product-list">
@@ -230,7 +331,7 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
                     <div className="admin-grid">
                       {products.map(p => (
                          <div key={p.id} className="admin-item">
-                           <img src={p.image && p.image !== '' ? p.image : 'https://source.unsplash.com/400x400/?baby,toys'} className="admin-item-img" alt={p.title} />
+                           <img src={p.image && p.image !== '' ? p.image : 'https://placehold.co/400x400?text=No+Image'} className="admin-item-img" alt={p.title} />
                            <div className="admin-item-info">
                                <strong>{p.title}</strong><br />
                                <small>{p.category}</small>
@@ -254,7 +355,9 @@ export default function AdminModal({ isOpen, onClose, categories, products, save
                          <label>Category Name</label>
                          <input type="text" required placeholder="e.g. Party Supplies" value={newCatName} onChange={e => setNewCatName(e.target.value)} />
                       </div>
-                      <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>Add Category</button>
+                      <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={isSubmitting}>
+                        {isSubmitting ? 'Adding...' : 'Add Category'}
+                      </button>
                    </form>
 
                    <div className="admin-product-list">
