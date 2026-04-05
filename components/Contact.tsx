@@ -43,7 +43,7 @@ export default function Contact() {
 
           <div className="map-container">
             <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d15664.8437!2d78.8785!3d11.234!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bab071f111816e1%3A0xa1ea14a51eb8aecd!2sReliance%20Trends!5e0!3m2!1sen!2sin!4v1712316000000!5m2!1sen!2sin"
+              src="https://www.google.com/maps?q=Baby%27s+World+and+Gifts+Perambalur+Ponmanam+Plaza&hl=en&z=18&output=embed"
               width="100%" height="100%" style={{ border: 0 }} allowFullScreen={false} loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"></iframe>
           </div>
